@@ -10,8 +10,11 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/providers/project_providers.dart';
+import '../../../core/models/project.dart';
+import '../../image_annotation/presentation/annotation_workspace_page.dart';
 import 'widgets/project_card.dart';
 import 'widgets/new_project_dialog.dart';
 
@@ -216,13 +219,57 @@ class _ProjectHomePageState extends ConsumerState<ProjectHomePage> {
   }
 
   /// Opens an existing project
-  void _openProject(BuildContext context, [dynamic project]) {
-    // TODO: Implement project opening logic
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Project opening feature coming soon!'),
-      ),
-    );
+  Future<void> _openProject(BuildContext context, [Project? project]) async {
+    try {
+      Project? projectToOpen = project;
+
+      // If no project is provided, use file picker to select project directory
+      if (projectToOpen == null) {
+        final selectedDirectory = await FilePicker.platform.getDirectoryPath(
+          dialogTitle: 'Select Project Directory',
+        );
+
+        if (selectedDirectory == null) {
+          return; // User canceled
+        }
+
+        // Try to load project from directory
+        projectToOpen = await ref.read(projectServiceProvider).getProjectFromDirectory(selectedDirectory);
+
+        if (projectToOpen == null) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('No valid project found in selected directory'),
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+            );
+          }
+          return;
+        }
+      }
+
+      // Set the current project
+      ref.read(currentProjectProvider.notifier).setProject(projectToOpen);
+
+      if (context.mounted) {
+        // Navigate to annotation workspace
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => AnnotationWorkspacePage(project: projectToOpen!),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error opening project: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
   }
 
   /// Deletes a project
