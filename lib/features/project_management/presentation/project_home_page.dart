@@ -252,6 +252,18 @@ class _ProjectHomePageState extends ConsumerState<ProjectHomePage> {
       // Set the current project
       ref.read(currentProjectProvider.notifier).setProject(projectToOpen);
 
+      // Import images if the project has images in the directory but not in database
+      try {
+        final existingImages = await ref.read(projectServiceProvider).getProjectImages(projectToOpen.id);
+        if (existingImages.isEmpty) {
+          // Try to import images from the images directory
+          await ref.read(projectServiceProvider).importImages(projectToOpen.id, projectToOpen.imagesPath);
+        }
+      } catch (e) {
+        print('Note: Could not auto-import images: $e');
+        // Continue anyway - user can manually import later
+      }
+
       if (context.mounted) {
         // Navigate to annotation workspace
         Navigator.of(context).push(

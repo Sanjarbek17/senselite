@@ -10,6 +10,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../../core/models/project.dart';
 import '../../../core/models/image_item.dart';
 import '../../../core/providers/project_providers.dart';
@@ -58,6 +59,13 @@ class _AnnotationWorkspacePageState extends ConsumerState<AnnotationWorkspacePag
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
+          // Import images button
+          IconButton(
+            icon: const Icon(Icons.add_photo_alternate),
+            onPressed: () => _importImages(context),
+            tooltip: 'Import Images',
+          ),
+          const VerticalDivider(),
           // Toggle left panel
           IconButton(
             icon: Icon(_isLeftPanelExpanded ? Icons.first_page : Icons.last_page),
@@ -164,5 +172,67 @@ class _AnnotationWorkspacePageState extends ConsumerState<AnnotationWorkspacePag
         ],
       ),
     );
+  }
+
+  /// Imports images from a directory
+  Future<void> _importImages(BuildContext context) async {
+    try {
+      final selectedDirectory = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Select Images Directory',
+      );
+
+      if (selectedDirectory == null) {
+        return; // User canceled
+      }
+
+      if (context.mounted) {
+        // Show loading dialog
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('Importing images...'),
+              ],
+            ),
+          ),
+        );
+
+        try {
+          await ref.read(projectServiceProvider).importImages(widget.project.id, selectedDirectory);
+
+          if (context.mounted) {
+            Navigator.of(context).pop(); // Close loading dialog
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Images imported successfully!'),
+              ),
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            Navigator.of(context).pop(); // Close loading dialog
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error importing images: $e'),
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error selecting directory: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
   }
 }
