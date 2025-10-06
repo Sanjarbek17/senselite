@@ -9,6 +9,7 @@
 // - Handle errors gracefully and validate inputs.
 
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/image_item.dart';
@@ -20,6 +21,54 @@ enum AnnotationTool {
   boundingBox,
   polygon,
   keypoint,
+}
+
+/// Represents a completed annotation on the canvas
+class CanvasAnnotation {
+  final String id;
+  final AnnotationTool tool;
+  final List<Offset> points;
+  final bool isSelected;
+
+  const CanvasAnnotation({
+    required this.id,
+    required this.tool,
+    required this.points,
+    this.isSelected = false,
+  });
+
+  CanvasAnnotation copyWith({
+    String? id,
+    AnnotationTool? tool,
+    List<Offset>? points,
+    bool? isSelected,
+  }) {
+    return CanvasAnnotation(
+      id: id ?? this.id,
+      tool: tool ?? this.tool,
+      points: points ?? this.points,
+      isSelected: isSelected ?? this.isSelected,
+    );
+  }
+
+  /// Get the bounding rectangle for this annotation
+  Rect get boundingRect {
+    if (points.isEmpty) return Rect.zero;
+
+    double minX = points.first.dx;
+    double maxX = points.first.dx;
+    double minY = points.first.dy;
+    double maxY = points.first.dy;
+
+    for (final point in points) {
+      minX = math.min(minX, point.dx);
+      maxX = math.max(maxX, point.dx);
+      minY = math.min(minY, point.dy);
+      maxY = math.max(maxY, point.dy);
+    }
+
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
 }
 
 /// Represents a drawing state for annotations
@@ -68,6 +117,8 @@ class AnnotationCanvas extends ConsumerStatefulWidget {
 
 class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
   DrawingState _drawingState = const DrawingState();
+  final List<CanvasAnnotation> _annotations = [];
+  CanvasAnnotation? _selectedAnnotation;
   final GlobalKey _imageKey = GlobalKey();
   final Size _imageSize = Size.zero;
   @override
@@ -228,6 +279,8 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
                     child: CustomPaint(
                       painter: DrawingPainter(
                         drawingState: _drawingState,
+                        annotations: _annotations,
+                        selectedAnnotation: _selectedAnnotation,
                         imageSize: _imageSize,
                       ),
                     ),
@@ -274,6 +327,30 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
 
   /// Handles pan start for drawing
   void _onPanStart(DragStartDetails details) {
+    // Check if clicking on an existing annotation for selection
+    final clickedAnnotation = _getAnnotationAtPoint(details.localPosition);
+
+    if (clickedAnnotation != null) {
+      // Select the annotation
+      setState(() {
+        _selectedAnnotation = clickedAnnotation;
+        // Clear any current drawing
+        _drawingState = _drawingState.copyWith(
+          points: [],
+          isDrawing: false,
+        );
+      });
+      return;
+    }
+
+    // Clear selection if clicking elsewhere
+    if (_selectedAnnotation != null) {
+      setState(() {
+        _selectedAnnotation = null;
+      });
+    }
+
+    // Start drawing if a tool is selected
     if (_drawingState.tool == AnnotationTool.none) return;
 
     setState(() {
@@ -334,12 +411,21 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
 
   /// Creates an annotation from the current drawing state
   void _createAnnotationFromDrawing() {
-    // TODO: Implement annotation creation
-    // This will convert screen coordinates to normalized coordinates
-    // and save the annotation to the database
-    print('Creating annotation: ${_drawingState.tool} with ${_drawingState.points.length} points');
+    if (_drawingState.points.length < 2) return;
 
-    // Show a temporary success message
+    // Create a new annotation
+    final annotation = CanvasAnnotation(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      tool: _drawingState.tool,
+      points: List.from(_drawingState.points),
+    );
+
+    setState(() {
+      _annotations.add(annotation);
+      _selectedAnnotation = annotation;
+    });
+
+    // Show success message
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('${_drawingState.tool.name} annotation created!'),
@@ -347,97 +433,191 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
       ),
     );
   }
+
+  /// Finds annotation at the given point
+  CanvasAnnotation? _getAnnotationAtPoint(Offset point) {
+    for (final annotation in _annotations.reversed) {
+      if (_isPointInAnnotation(point, annotation)) {
+        return annotation;
+      }
+    }
+    return null;
+  }
+
+  /// Checks if a point is inside an annotation
+  bool _isPointInAnnotation(Offset point, CanvasAnnotation annotation) {
+    switch (annotation.tool) {
+      case AnnotationTool.boundingBox:
+        if (annotation.points.length >= 2) {
+          final rect = Rect.fromPoints(annotation.points[0], annotation.points[1]);
+          return rect.contains(point);
+        }
+        break;
+      case AnnotationTool.polygon:
+        // Simple polygon point-in-polygon test
+        return _pointInPolygon(point, annotation.points);
+      case AnnotationTool.keypoint:
+        // Check if point is near any keypoint
+        for (final kp in annotation.points) {
+          if ((kp - point).distance < 10) return true;
+        }
+        break;
+      case AnnotationTool.none:
+        break;
+    }
+    return false;
+  }
+
+  /// Point-in-polygon test using ray casting algorithm
+  bool _pointInPolygon(Offset point, List<Offset> polygon) {
+    if (polygon.length < 3) return false;
+
+    bool inside = false;
+    int j = polygon.length - 1;
+
+    for (int i = 0; i < polygon.length; i++) {
+      final xi = polygon[i].dx;
+      final yi = polygon[i].dy;
+      final xj = polygon[j].dx;
+      final yj = polygon[j].dy;
+
+      if (((yi > point.dy) != (yj > point.dy)) && (point.dx < (xj - xi) * (point.dy - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+      j = i;
+    }
+
+    return inside;
+  }
 }
 
 /// Custom painter for drawing annotations
 class DrawingPainter extends CustomPainter {
   final DrawingState drawingState;
+  final List<CanvasAnnotation> annotations;
+  final CanvasAnnotation? selectedAnnotation;
   final Size imageSize;
 
   DrawingPainter({
     required this.drawingState,
+    required this.annotations,
+    required this.selectedAnnotation,
     required this.imageSize,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (drawingState.points.isEmpty) return;
+    // Draw all persistent annotations first
+    for (final annotation in annotations) {
+      final isSelected = annotation == selectedAnnotation;
+      _drawAnnotation(canvas, annotation, isSelected);
+    }
 
+    // Draw current drawing state on top
+    if (drawingState.points.isNotEmpty) {
+      _drawCurrentDrawing(canvas);
+    }
+  }
+
+  void _drawAnnotation(Canvas canvas, CanvasAnnotation annotation, bool isSelected) {
     final paint = Paint()
-      ..color = Colors.blue
-      ..strokeWidth = 2.0
+      ..color = isSelected ? Colors.orange : Colors.blue
+      ..strokeWidth = isSelected ? 3.0 : 2.0
       ..style = PaintingStyle.stroke;
 
-    switch (drawingState.tool) {
+    switch (annotation.tool) {
       case AnnotationTool.boundingBox:
-        _drawBoundingBox(canvas, paint);
+        _drawBoundingBoxAnnotation(canvas, annotation.points, paint, isSelected);
         break;
       case AnnotationTool.polygon:
-        _drawPolygon(canvas, paint);
+        _drawPolygonAnnotation(canvas, annotation.points, paint);
         break;
       case AnnotationTool.keypoint:
-        _drawKeypoints(canvas, paint);
+        _drawKeypointsAnnotation(canvas, annotation.points, paint);
         break;
       case AnnotationTool.none:
         break;
     }
   }
 
-  void _drawBoundingBox(Canvas canvas, Paint paint) {
-    if (drawingState.points.length < 2) return;
+  void _drawCurrentDrawing(Canvas canvas) {
+    final paint = Paint()
+      ..color = Colors.green
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
 
-    final start = drawingState.points.first;
-    final end = drawingState.points.last;
+    switch (drawingState.tool) {
+      case AnnotationTool.boundingBox:
+        _drawBoundingBoxAnnotation(canvas, drawingState.points, paint, false);
+        break;
+      case AnnotationTool.polygon:
+        _drawPolygonAnnotation(canvas, drawingState.points, paint);
+        break;
+      case AnnotationTool.keypoint:
+        _drawKeypointsAnnotation(canvas, drawingState.points, paint);
+        break;
+      case AnnotationTool.none:
+        break;
+    }
+  }
+
+  void _drawBoundingBoxAnnotation(Canvas canvas, List<Offset> points, Paint paint, bool showHandles) {
+    if (points.length < 2) return;
+
+    final start = points.first;
+    final end = points.last;
 
     final rect = Rect.fromPoints(start, end);
     canvas.drawRect(rect, paint);
 
-    // Draw corner handles
-    final handlePaint = Paint()
-      ..color = Colors.blue
-      ..style = PaintingStyle.fill;
+    // Draw corner handles only for selected annotations
+    if (showHandles) {
+      final handlePaint = Paint()
+        ..color = paint.color
+        ..style = PaintingStyle.fill;
 
-    const handleSize = 6.0;
-    canvas.drawCircle(rect.topLeft, handleSize, handlePaint);
-    canvas.drawCircle(rect.topRight, handleSize, handlePaint);
-    canvas.drawCircle(rect.bottomLeft, handleSize, handlePaint);
-    canvas.drawCircle(rect.bottomRight, handleSize, handlePaint);
+      const handleSize = 6.0;
+      canvas.drawCircle(rect.topLeft, handleSize, handlePaint);
+      canvas.drawCircle(rect.topRight, handleSize, handlePaint);
+      canvas.drawCircle(rect.bottomLeft, handleSize, handlePaint);
+      canvas.drawCircle(rect.bottomRight, handleSize, handlePaint);
+    }
   }
 
-  void _drawPolygon(Canvas canvas, Paint paint) {
-    if (drawingState.points.length < 2) return;
+  void _drawPolygonAnnotation(Canvas canvas, List<Offset> points, Paint paint) {
+    if (points.length < 2) return;
 
     final path = Path();
-    path.moveTo(drawingState.points.first.dx, drawingState.points.first.dy);
+    path.moveTo(points.first.dx, points.first.dy);
 
-    for (int i = 1; i < drawingState.points.length; i++) {
-      path.lineTo(drawingState.points[i].dx, drawingState.points[i].dy);
+    for (int i = 1; i < points.length; i++) {
+      path.lineTo(points[i].dx, points[i].dy);
     }
 
     canvas.drawPath(path, paint);
 
     // Draw points
     final pointPaint = Paint()
-      ..color = Colors.blue
+      ..color = paint.color
       ..style = PaintingStyle.fill;
 
-    for (final point in drawingState.points) {
+    for (final point in points) {
       canvas.drawCircle(point, 4.0, pointPaint);
     }
   }
 
-  void _drawKeypoints(Canvas canvas, Paint paint) {
+  void _drawKeypointsAnnotation(Canvas canvas, List<Offset> points, Paint paint) {
     final pointPaint = Paint()
-      ..color = Colors.red
+      ..color = paint.color == Colors.blue ? Colors.red : paint.color
       ..style = PaintingStyle.fill;
 
-    for (final point in drawingState.points) {
+    for (final point in points) {
       canvas.drawCircle(point, 6.0, pointPaint);
     }
   }
 
   @override
   bool shouldRepaint(DrawingPainter oldDelegate) {
-    return oldDelegate.drawingState != drawingState || oldDelegate.imageSize != imageSize;
+    return oldDelegate.drawingState != drawingState || oldDelegate.annotations != annotations || oldDelegate.selectedAnnotation != selectedAnnotation || oldDelegate.imageSize != imageSize;
   }
 }
