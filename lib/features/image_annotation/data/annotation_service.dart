@@ -14,6 +14,7 @@ import '../../../core/models/annotation.dart';
 import '../../../core/models/label.dart';
 import '../../../core/database/annotation_dao.dart';
 import '../../../core/database/image_dao.dart';
+import '../providers/annotation_providers.dart';
 import '../presentation/widgets/annotation_canvas.dart';
 
 /// Service for managing annotations in the image annotation feature

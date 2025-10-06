@@ -8,6 +8,7 @@
 // - Write unit and widget tests for each feature.
 // - Handle errors gracefully and validate inputs.
 
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/annotation.dart';
 import '../data/annotation_service.dart';
@@ -95,4 +96,135 @@ class ImageAnnotationsNotifier extends StateNotifier<AsyncValue<List<Annotation>
 final imageAnnotationsNotifierProvider = StateNotifierProvider.family<ImageAnnotationsNotifier, AsyncValue<List<Annotation>>, String>((ref, imageId) {
   final annotationService = ref.watch(annotationServiceProvider);
   return ImageAnnotationsNotifier(annotationService, imageId);
+});
+
+/// Available annotation tools
+enum AnnotationTool {
+  none,
+  boundingBox,
+  polygon,
+  keypoint,
+}
+
+/// Represents a drawing state for annotations
+class DrawingState {
+  final AnnotationTool tool;
+  final List<Offset> points;
+  final bool isDrawing;
+
+  const DrawingState({
+    this.tool = AnnotationTool.none,
+    this.points = const [],
+    this.isDrawing = false,
+  });
+
+  DrawingState copyWith({
+    AnnotationTool? tool,
+    List<Offset>? points,
+    bool? isDrawing,
+  }) {
+    return DrawingState(
+      tool: tool ?? this.tool,
+      points: points ?? this.points,
+      isDrawing: isDrawing ?? this.isDrawing,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is DrawingState && other.tool == tool && _listEquals(other.points, points) && other.isDrawing == isDrawing;
+  }
+
+  @override
+  int get hashCode => tool.hashCode ^ points.hashCode ^ isDrawing.hashCode;
+
+  /// Helper method to compare lists
+  bool _listEquals<T>(List<T>? a, List<T>? b) {
+    if (a == null) return b == null;
+    if (b == null || a.length != b.length) return false;
+    for (int index = 0; index < a.length; index += 1) {
+      if (a[index] != b[index]) return false;
+    }
+    return true;
+  }
+}
+
+/// State notifier for managing drawing state
+class DrawingStateNotifier extends StateNotifier<DrawingState> {
+  DrawingStateNotifier() : super(const DrawingState());
+
+  /// Select a tool
+  void selectTool(AnnotationTool tool) {
+    if (state.tool == tool) {
+      // Deselect if same tool is clicked
+      state = const DrawingState();
+    } else {
+      // Select new tool and clear any partial drawing
+      state = state.copyWith(
+        tool: tool,
+        points: [],
+        isDrawing: false,
+      );
+    }
+  }
+
+  /// Start drawing
+  void startDrawing(Offset point) {
+    if (state.tool == AnnotationTool.none) return;
+
+    state = state.copyWith(
+      points: [point],
+      isDrawing: true,
+    );
+  }
+
+  /// Update drawing
+  void updateDrawing(Offset point) {
+    if (!state.isDrawing || state.tool == AnnotationTool.none) return;
+
+    switch (state.tool) {
+      case AnnotationTool.boundingBox:
+        // For bounding box, only keep start and current point
+        state = state.copyWith(
+          points: [state.points.first, point],
+        );
+        break;
+      case AnnotationTool.polygon:
+      case AnnotationTool.keypoint:
+        // For polygon and keypoint, add all points
+        state = state.copyWith(
+          points: [...state.points, point],
+        );
+        break;
+      case AnnotationTool.none:
+        break;
+    }
+  }
+
+  /// End drawing
+  void endDrawing() {
+    state = state.copyWith(
+      points: [],
+      isDrawing: false,
+    );
+  }
+
+  /// Clear drawing state
+  void clearDrawing() {
+    state = state.copyWith(
+      points: [],
+      isDrawing: false,
+    );
+  }
+
+  /// Reset all drawing state
+  void reset() {
+    state = const DrawingState();
+  }
+}
+
+/// Provider for drawing state notifier
+final drawingStateNotifierProvider = StateNotifierProvider<DrawingStateNotifier, DrawingState>((ref) {
+  return DrawingStateNotifier();
 });

@@ -17,14 +17,6 @@ import '../../../../core/models/project.dart';
 import '../../../../core/providers/label_providers.dart';
 import '../../providers/annotation_providers.dart';
 
-/// Available annotation tools
-enum AnnotationTool {
-  none,
-  boundingBox,
-  polygon,
-  keypoint,
-}
-
 /// Represents a completed annotation on the canvas
 class CanvasAnnotation {
   final String id;
@@ -73,31 +65,6 @@ class CanvasAnnotation {
   }
 }
 
-/// Represents a drawing state for annotations
-class DrawingState {
-  final AnnotationTool tool;
-  final List<Offset> points;
-  final bool isDrawing;
-
-  const DrawingState({
-    this.tool = AnnotationTool.none,
-    this.points = const [],
-    this.isDrawing = false,
-  });
-
-  DrawingState copyWith({
-    AnnotationTool? tool,
-    List<Offset>? points,
-    bool? isDrawing,
-  }) {
-    return DrawingState(
-      tool: tool ?? this.tool,
-      points: points ?? this.points,
-      isDrawing: isDrawing ?? this.isDrawing,
-    );
-  }
-}
-
 /// Widget for displaying and annotating images
 class AnnotationCanvas extends ConsumerStatefulWidget {
   /// The image to display and annotate
@@ -118,9 +85,6 @@ class AnnotationCanvas extends ConsumerStatefulWidget {
 }
 
 class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
-  /// Holds the current drawing state for annotation interactions (tool, points, drawing status)
-  DrawingState _drawingState = const DrawingState();
-
   /// Stores all completed annotations drawn on the canvas
   final List<CanvasAnnotation> _annotations = [];
 
@@ -159,7 +123,6 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
   void dispose() {
     debugPrint('AnnotationCanvas dispose for image: ${widget.imageItem.id}');
     // Clear any pending operations and state
-    _drawingState = const DrawingState();
     _annotations.clear();
     _selectedAnnotation = null;
     super.dispose();
@@ -221,7 +184,16 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
                 // Clear tool
                 IconButton(
                   icon: const Icon(Icons.clear),
-                  onPressed: _drawingState.tool != AnnotationTool.none ? () => _selectTool(AnnotationTool.none) : null,
+                  onPressed: () {
+                    final drawingState = ref.read(drawingStateNotifierProvider);
+                    if (drawingState.tool != AnnotationTool.none) {
+                      ref.read(drawingStateNotifierProvider.notifier).selectTool(AnnotationTool.none);
+                      // Clear selected annotation when clearing tool
+                      setState(() {
+                        _selectedAnnotation = null;
+                      });
+                    }
+                  },
                   tooltip: 'Clear Tool',
                 ),
               ],
@@ -321,7 +293,8 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
     required AnnotationTool tool,
     required String tooltip,
   }) {
-    final isSelected = _drawingState.tool == tool;
+    final drawingState = ref.watch(drawingStateNotifierProvider);
+    final isSelected = drawingState.tool == tool;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 2),
@@ -334,30 +307,16 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
           icon,
           color: isSelected ? Theme.of(context).colorScheme.onPrimaryContainer : null,
         ),
-        onPressed: () => _selectTool(tool),
+        onPressed: () {
+          ref.read(drawingStateNotifierProvider.notifier).selectTool(tool);
+          // Clear selected annotation when switching tools
+          setState(() {
+            _selectedAnnotation = null;
+          });
+        },
         tooltip: tooltip,
       ),
     );
-  }
-
-  /// Selects an annotation tool
-  void _selectTool(AnnotationTool tool) {
-    setState(() {
-      if (_drawingState.tool == tool) {
-        // Deselect if same tool is clicked
-        _drawingState = const DrawingState();
-      } else {
-        // Select new tool and clear any partial drawing
-        _drawingState = _drawingState.copyWith(
-          tool: tool,
-          points: [],
-          isDrawing: false,
-        );
-      }
-
-      // Clear selected annotation when switching tools
-      _selectedAnnotation = null;
-    });
   }
 
   /// Builds the interactive image display with drawing capabilities
@@ -399,26 +358,26 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
                 ),
               ),
             ),
-            // Drawing overlay
-            if (_drawingState.tool != AnnotationTool.none)
-              Positioned.fill(
-                child: Container(
-                  margin: const EdgeInsets.all(16),
-                  child: GestureDetector(
-                    onPanStart: _onPanStart,
-                    onPanUpdate: _onPanUpdate,
-                    onPanEnd: _onPanEnd,
-                    child: CustomPaint(
-                      painter: DrawingPainter(
-                        drawingState: _drawingState,
-                        annotations: _annotations,
-                        selectedAnnotation: _selectedAnnotation,
-                        imageSize: _imageSize,
-                      ),
+            // Annotation overlay - always visible for existing annotations
+            Positioned.fill(
+              child: Container(
+                margin: const EdgeInsets.all(16),
+                child: GestureDetector(
+                  onPanStart: _onPanStart,
+                  onPanUpdate: _onPanUpdate,
+                  onPanEnd: _onPanEnd,
+                  child: CustomPaint(
+                    painter: DrawingPainter(
+                      drawingState: ref.watch(drawingStateNotifierProvider),
+                      annotations: _annotations,
+                      selectedAnnotation: _selectedAnnotation,
+                      imageSize: _imageSize,
+                      isToolSelected: ref.watch(drawingStateNotifierProvider).tool != AnnotationTool.none,
                     ),
                   ),
                 ),
               ),
+            ),
           ],
         );
       },
@@ -466,12 +425,9 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
       // Select the annotation
       setState(() {
         _selectedAnnotation = clickedAnnotation;
-        // Clear any current drawing
-        _drawingState = _drawingState.copyWith(
-          points: [],
-          isDrawing: false,
-        );
       });
+      // Clear any current drawing
+      ref.read(drawingStateNotifierProvider.notifier).clearDrawing();
       return;
     }
 
@@ -482,68 +438,38 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
       });
     }
 
-    // Start drawing if a tool is selected
-    if (_drawingState.tool == AnnotationTool.none) return;
+    // Start drawing only if a tool is selected
+    final drawingState = ref.read(drawingStateNotifierProvider);
+    if (drawingState.tool == AnnotationTool.none) return;
 
-    setState(() {
-      _drawingState = _drawingState.copyWith(
-        points: [details.localPosition],
-        isDrawing: true,
-      );
-    });
+    ref.read(drawingStateNotifierProvider.notifier).startDrawing(details.localPosition);
   }
 
   /// Handles pan update for drawing
   void _onPanUpdate(DragUpdateDetails details) {
-    if (!_drawingState.isDrawing) return;
-
-    setState(() {
-      switch (_drawingState.tool) {
-        case AnnotationTool.boundingBox:
-          // For bounding box, only keep start and current point
-          _drawingState = _drawingState.copyWith(
-            points: [_drawingState.points.first, details.localPosition],
-          );
-          break;
-        case AnnotationTool.polygon:
-        case AnnotationTool.keypoint:
-          // For polygon and keypoint, add all points
-          _drawingState = _drawingState.copyWith(
-            points: [..._drawingState.points, details.localPosition],
-          );
-          break;
-        case AnnotationTool.none:
-          break;
-      }
-    });
+    ref.read(drawingStateNotifierProvider.notifier).updateDrawing(details.localPosition);
   }
 
   /// Handles pan end for drawing
   void _onPanEnd(DragEndDetails details) {
-    if (!_drawingState.isDrawing || _drawingState.points.length < 2) {
-      setState(() {
-        _drawingState = _drawingState.copyWith(
-          points: [],
-          isDrawing: false,
-        );
-      });
+    final drawingState = ref.read(drawingStateNotifierProvider);
+
+    if (!drawingState.isDrawing || drawingState.tool == AnnotationTool.none || drawingState.points.length < 2) {
+      ref.read(drawingStateNotifierProvider.notifier).endDrawing();
       return;
     }
 
     // Create annotation from drawing
     _createAnnotationFromDrawing();
 
-    setState(() {
-      _drawingState = _drawingState.copyWith(
-        points: [],
-        isDrawing: false,
-      );
-    });
+    ref.read(drawingStateNotifierProvider.notifier).endDrawing();
   }
 
   /// Creates an annotation from the current drawing state
   void _createAnnotationFromDrawing() {
-    if (_drawingState.points.length < 2) return;
+    final drawingState = ref.read(drawingStateNotifierProvider);
+
+    if (drawingState.points.length < 2) return;
 
     // Check if a label is selected
     final selectedLabel = ref.read(selectedLabelProvider);
@@ -568,8 +494,8 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
     // Create a new annotation
     final annotation = CanvasAnnotation(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
-      tool: _drawingState.tool,
-      points: List.from(_drawingState.points),
+      tool: drawingState.tool,
+      points: List.from(drawingState.points),
     );
 
     setState(() {
@@ -580,7 +506,7 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
     // Show success message with label information
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${_drawingState.tool.name} annotation created with label "${selectedLabel.name}"!'),
+        content: Text('${drawingState.tool.name} annotation created with label "${selectedLabel.name}"!'),
         duration: const Duration(seconds: 2),
         backgroundColor: selectedLabel.color.withOpacity(0.8),
       ),
@@ -648,10 +574,10 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
 
   /// Resets the canvas state when switching to a new image
   void _resetCanvasForNewImage() {
-    setState(() {
-      // Clear drawing state (any partial drawings)
-      _drawingState = const DrawingState();
+    // Reset drawing state using provider
+    ref.read(drawingStateNotifierProvider.notifier).reset();
 
+    setState(() {
       // Clear existing annotations from the previous image
       _annotations.clear();
 
@@ -765,12 +691,14 @@ class DrawingPainter extends CustomPainter {
   final List<CanvasAnnotation> annotations;
   final CanvasAnnotation? selectedAnnotation;
   final Size imageSize;
+  final bool isToolSelected;
 
   DrawingPainter({
     required this.drawingState,
     required this.annotations,
     required this.selectedAnnotation,
     required this.imageSize,
+    required this.isToolSelected,
   });
 
   @override
@@ -781,8 +709,8 @@ class DrawingPainter extends CustomPainter {
       _drawAnnotation(canvas, annotation, isSelected);
     }
 
-    // Draw current drawing state on top
-    if (drawingState.points.isNotEmpty) {
+    // Draw current drawing state on top only if a tool is selected
+    if (isToolSelected && drawingState.points.isNotEmpty) {
       _drawCurrentDrawing(canvas);
     }
   }
@@ -886,6 +814,6 @@ class DrawingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(DrawingPainter oldDelegate) {
-    return oldDelegate.drawingState != drawingState || oldDelegate.annotations != annotations || oldDelegate.selectedAnnotation != selectedAnnotation || oldDelegate.imageSize != imageSize;
+    return oldDelegate.drawingState != drawingState || oldDelegate.annotations != annotations || oldDelegate.selectedAnnotation != selectedAnnotation || oldDelegate.imageSize != imageSize || oldDelegate.isToolSelected != isToolSelected;
   }
 }
