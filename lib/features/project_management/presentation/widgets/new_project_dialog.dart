@@ -224,28 +224,50 @@ class _NewProjectDialogState extends ConsumerState<NewProjectDialog> {
 
   /// Selects the project directory
   Future<void> _selectProjectDirectory() async {
-    final result = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select Project Directory',
-    );
+    try {
+      final result = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Select Project Directory',
+      );
 
-    if (result != null) {
-      _projectPathController.text = result;
+      if (result != null) {
+        _projectPathController.text = result;
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error selecting directory: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
     }
   }
 
   /// Selects the images directory
   Future<void> _selectImagesDirectory() async {
-    final result = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select Images Directory',
-    );
+    try {
+      final result = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Select Images Directory',
+      );
 
-    if (result != null) {
-      _imagesPathController.text = result;
+      if (result != null) {
+        _imagesPathController.text = result;
 
-      // If project directory is not set, suggest a subdirectory
-      if (_projectPathController.text.isEmpty) {
-        final suggestedProjectPath = Directory(result).parent.path;
-        _projectPathController.text = suggestedProjectPath;
+        // If project directory is not set, suggest a subdirectory
+        if (_projectPathController.text.isEmpty) {
+          final suggestedProjectPath = Directory(result).parent.path;
+          _projectPathController.text = suggestedProjectPath;
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error selecting directory: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
       }
     }
   }
