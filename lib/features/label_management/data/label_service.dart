@@ -132,45 +132,6 @@ class LabelService {
     await _labelDao.updateAnnotationCount(labelId, count);
   }
 
-  /// Creates default labels for a new project
-  Future<List<Label>> createDefaultLabels(String projectId) async {
-    final defaultLabels = [
-      {
-        'name': 'Object',
-        'color': Color(AppConstants.defaultLabelColors[0]),
-        'shortcut': '1',
-      },
-      {
-        'name': 'Person',
-        'color': Color(AppConstants.defaultLabelColors[1]),
-        'shortcut': '2',
-      },
-      {
-        'name': 'Vehicle',
-        'color': Color(AppConstants.defaultLabelColors[2]),
-        'shortcut': '3',
-      },
-    ];
-
-    final labels = <Label>[];
-    for (final labelData in defaultLabels) {
-      try {
-        final label = await createLabel(
-          name: labelData['name'] as String,
-          color: labelData['color'] as Color,
-          projectId: projectId,
-          shortcut: labelData['shortcut'] as String,
-        );
-        labels.add(label);
-      } catch (e) {
-        // Skip if already exists
-        continue;
-      }
-    }
-
-    return labels;
-  }
-
   /// Gets next available shortcut number for a project
   Future<String?> getNextAvailableShortcut(String projectId) async {
     final labels = await getProjectLabels(projectId);

@@ -41,13 +41,36 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
   @override
   void initState() {
     super.initState();
-    // Load labels and create defaults if empty
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final notifier = ref.read(projectLabelsNotifierProvider(widget.project.id).notifier);
-      notifier.loadLabels().then((_) {
-        notifier.createDefaultLabelsIfEmpty();
-      });
+    // Load labels for the project and auto-select first label
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _loadAndSelectFirstLabel();
     });
+  }
+
+  @override
+  void didUpdateWidget(PropertiesPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If the project changed, reload labels and select first one
+    if (oldWidget.project.id != widget.project.id) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _loadAndSelectFirstLabel();
+      });
+    }
+  }
+
+  /// Loads labels for the current project and selects the first one
+  Future<void> _loadAndSelectFirstLabel() async {
+    // Clear any previously selected label first
+    ref.read(selectedLabelProvider.notifier).clearSelection();
+
+    // Load labels for the current project
+    await ref.read(projectLabelsNotifierProvider(widget.project.id).notifier).loadLabels();
+
+    // Always select the first label if available (regardless of previous selection)
+    final labels = ref.read(projectLabelsNotifierProvider(widget.project.id));
+    if (labels.isNotEmpty) {
+      ref.read(selectedLabelProvider.notifier).selectLabel(labels.first);
+    }
   }
 
   @override

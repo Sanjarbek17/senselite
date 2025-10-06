@@ -14,6 +14,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../../core/models/project.dart';
 import '../../../core/models/image_item.dart';
 import '../../../core/providers/project_providers.dart';
+import '../../../core/providers/label_providers.dart';
 import 'widgets/image_list_panel.dart';
 import 'widgets/annotation_canvas.dart';
 import 'widgets/properties_panel.dart';
@@ -45,6 +46,13 @@ class _AnnotationWorkspacePageState extends ConsumerState<AnnotationWorkspacePag
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(currentProjectProvider.notifier).setProject(widget.project);
     });
+  }
+
+  @override
+  void dispose() {
+    // Clear selected label when leaving the workspace
+    ref.read(selectedLabelProvider.notifier).clearSelection();
+    super.dispose();
   }
 
   @override

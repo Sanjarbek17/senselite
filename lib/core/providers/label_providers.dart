@@ -111,18 +111,6 @@ class ProjectLabelsNotifier extends StateNotifier<List<Label>> {
     await loadLabels();
   }
 
-  /// Creates default labels if none exist
-  Future<void> createDefaultLabelsIfEmpty() async {
-    if (state.isEmpty) {
-      try {
-        final defaultLabels = await _labelService.createDefaultLabels(_projectId);
-        state = [...state, ...defaultLabels];
-      } catch (e) {
-        // Ignore error if labels already exist
-      }
-    }
-  }
-
   /// Gets next available shortcut
   Future<String?> getNextAvailableShortcut() async {
     return await _labelService.getNextAvailableShortcut(_projectId);
