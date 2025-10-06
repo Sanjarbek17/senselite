@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/image_item.dart';
 import '../../../../core/models/project.dart';
+import '../../../../core/providers/label_providers.dart';
 
 /// Available annotation tools
 enum AnnotationTool {
@@ -153,6 +154,9 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                const SizedBox(width: 16),
+                // Selected label indicator
+                _buildSelectedLabelIndicator(),
                 const Spacer(),
                 // Annotation tools
                 _buildToolButton(
@@ -187,6 +191,82 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
               child: _buildInteractiveImageDisplay(),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Builds the selected label indicator
+  Widget _buildSelectedLabelIndicator() {
+    final selectedLabel = ref.watch(selectedLabelProvider);
+
+    if (selectedLabel == null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.error.withOpacity(0.3),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.warning,
+              size: 16,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              'No Label Selected',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.error,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: selectedLabel.color.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: selectedLabel.color.withOpacity(0.5),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: selectedLabel.color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            selectedLabel.name,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          if (selectedLabel.shortcut != null) ...[
+            const SizedBox(width: 4),
+            Text(
+              '(${selectedLabel.shortcut})',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -413,6 +493,26 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
   void _createAnnotationFromDrawing() {
     if (_drawingState.points.length < 2) return;
 
+    // Check if a label is selected
+    final selectedLabel = ref.read(selectedLabelProvider);
+    if (selectedLabel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Please select a label before creating annotations'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'Select Label',
+            textColor: Colors.white,
+            onPressed: () {
+              // Focus could be brought to properties panel here
+            },
+          ),
+        ),
+      );
+      return;
+    }
+
     // Create a new annotation
     final annotation = CanvasAnnotation(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -425,13 +525,17 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
       _selectedAnnotation = annotation;
     });
 
-    // Show success message
+    // Show success message with label information
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${_drawingState.tool.name} annotation created!'),
+        content: Text('${_drawingState.tool.name} annotation created with label "${selectedLabel.name}"!'),
         duration: const Duration(seconds: 2),
+        backgroundColor: selectedLabel.color.withOpacity(0.8),
       ),
     );
+
+    // TODO: Save annotation to database with selected label
+    // This would involve creating a proper Annotation object and saving it
   }
 
   /// Finds annotation at the given point
