@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/image_item.dart';
 import '../../../../core/models/project.dart';
 import '../../../../core/providers/label_providers.dart';
+import '../../providers/annotation_providers.dart';
 
 /// Available annotation tools
 enum AnnotationTool {
@@ -117,11 +118,53 @@ class AnnotationCanvas extends ConsumerStatefulWidget {
 }
 
 class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
+  /// Holds the current drawing state for annotation interactions (tool, points, drawing status)
   DrawingState _drawingState = const DrawingState();
+
+  /// Stores all completed annotations drawn on the canvas
   final List<CanvasAnnotation> _annotations = [];
+
+  /// The currently selected annotation on the canvas, if any
   CanvasAnnotation? _selectedAnnotation;
   final GlobalKey _imageKey = GlobalKey();
-  final Size _imageSize = Size.zero;
+  Size _imageSize = Size.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    debugPrint('AnnotationCanvas initState for image: ${widget.imageItem.id}');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadExistingAnnotations();
+    });
+  }
+
+  @override
+  void didUpdateWidget(AnnotationCanvas oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Check if the image has changed
+    if (oldWidget.imageItem.id != widget.imageItem.id) {
+      debugPrint('AnnotationCanvas image changed from ${oldWidget.imageItem.id} to ${widget.imageItem.id}');
+      // Reset the canvas state for the new image
+      _resetCanvasForNewImage();
+
+      // Load annotations for the new image
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadExistingAnnotations();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    debugPrint('AnnotationCanvas dispose for image: ${widget.imageItem.id}');
+    // Clear any pending operations and state
+    _drawingState = const DrawingState();
+    _annotations.clear();
+    _selectedAnnotation = null;
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -304,13 +347,16 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
         // Deselect if same tool is clicked
         _drawingState = const DrawingState();
       } else {
-        // Select new tool
+        // Select new tool and clear any partial drawing
         _drawingState = _drawingState.copyWith(
           tool: tool,
           points: [],
           isDrawing: false,
         );
       }
+
+      // Clear selected annotation when switching tools
+      _selectedAnnotation = null;
     });
   }
 
@@ -341,6 +387,12 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
                   imageFile,
                   key: _imageKey,
                   fit: BoxFit.contain,
+                  frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                    if (frame != null) {
+                      _updateImageSize();
+                    }
+                    return child;
+                  },
                   errorBuilder: (context, error, stackTrace) {
                     return _buildErrorState('Error loading image', error.toString());
                   },
@@ -534,8 +586,8 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
       ),
     );
 
-    // TODO: Save annotation to database with selected label
-    // This would involve creating a proper Annotation object and saving it
+    // Save annotation to database with selected label
+    _saveAnnotationToDatabase(annotation, selectedLabel);
   }
 
   /// Finds annotation at the given point
@@ -592,6 +644,118 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
     }
 
     return inside;
+  }
+
+  /// Resets the canvas state when switching to a new image
+  void _resetCanvasForNewImage() {
+    setState(() {
+      // Clear drawing state (any partial drawings)
+      _drawingState = const DrawingState();
+
+      // Clear existing annotations from the previous image
+      _annotations.clear();
+
+      // Clear selected annotation
+      _selectedAnnotation = null;
+
+      // Reset image size (will be recalculated for new image)
+      _imageSize = Size.zero;
+    });
+
+    // Show a subtle indication that the canvas has been reset for the new image
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Loaded image: ${widget.imageItem.filename}'),
+          duration: const Duration(milliseconds: 1500),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 80, left: 16, right: 16),
+        ),
+      );
+    }
+  }
+
+  /// Loads existing annotations from the database for this image
+  Future<void> _loadExistingAnnotations() async {
+    try {
+      final annotationService = ref.read(annotationServiceProvider);
+      final annotations = await annotationService.getAnnotationsForImage(widget.imageItem.id);
+
+      if (mounted) {
+        setState(() {
+          _annotations.clear();
+          for (final annotation in annotations) {
+            // Convert database annotation to canvas annotation
+            final canvasAnnotation = annotationService.convertToCanvasAnnotation(annotation, _imageSize);
+            _annotations.add(canvasAnnotation);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading annotations: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Saves a canvas annotation to the database
+  Future<void> _saveAnnotationToDatabase(CanvasAnnotation canvasAnnotation, selectedLabel) async {
+    try {
+      final annotationService = ref.read(annotationServiceProvider);
+
+      if (_imageSize == Size.zero) {
+        // Try to get image size from the widget
+        final RenderBox? renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+        if (renderBox != null) {
+          _imageSize = renderBox.size;
+        } else {
+          // Fallback to image item dimensions
+          _imageSize = Size(widget.imageItem.width.toDouble(), widget.imageItem.height.toDouble());
+        }
+      }
+
+      await annotationService.createAnnotation(
+        imageId: widget.imageItem.id,
+        projectId: widget.project.id,
+        label: selectedLabel,
+        tool: canvasAnnotation.tool,
+        canvasPoints: canvasAnnotation.points,
+        imageSize: _imageSize,
+      );
+
+      // Refresh the annotations notifier if being used
+      if (ref.exists(imageAnnotationsNotifierProvider(widget.imageItem.id))) {
+        ref.read(imageAnnotationsNotifierProvider(widget.imageItem.id).notifier).refresh();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving annotation: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Updates the image size when the image is loaded
+  void _updateImageSize() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final RenderBox? renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+      if (renderBox != null && renderBox.size != Size.zero && _imageSize != renderBox.size) {
+        setState(() {
+          _imageSize = renderBox.size;
+        });
+        // Reload annotations with correct size
+        _loadExistingAnnotations();
+      }
+    });
   }
 }
 

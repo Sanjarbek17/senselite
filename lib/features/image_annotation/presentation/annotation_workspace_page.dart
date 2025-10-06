@@ -123,6 +123,7 @@ class _AnnotationWorkspacePageState extends ConsumerState<AnnotationWorkspacePag
           Expanded(
             child: _selectedImage != null
                 ? AnnotationCanvas(
+                    key: ValueKey(_selectedImage!.id), // Unique key prevents widget multiplication
                     imageItem: _selectedImage!,
                     project: widget.project,
                   )
