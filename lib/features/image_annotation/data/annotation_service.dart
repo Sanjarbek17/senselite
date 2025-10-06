@@ -123,6 +123,27 @@ class AnnotationService {
         throw ArgumentError('Cannot create annotation with tool type "none"');
     }
 
+    // Validate annotation before saving
+    if (annotation.id.isEmpty || annotation.labelId.isEmpty || annotation.imageId.isEmpty || annotation.projectId.isEmpty) {
+      throw ArgumentError(
+        'Created annotation has invalid data: '
+        'id=${annotation.id}, labelId=${annotation.labelId}, '
+        'imageId=${annotation.imageId}, projectId=${annotation.projectId}',
+      );
+    }
+
+    // Test serialization to catch issues early
+    try {
+      final json = annotation.toJson();
+      if (!json.containsKey('type') || json['type'] == null) {
+        throw ArgumentError('Annotation JSON missing type field');
+      }
+      // Test deserialization
+      Annotation.fromJson(json);
+    } catch (e) {
+      throw ArgumentError('Annotation serialization test failed: $e');
+    }
+
     // Save to database
     await _annotationDao.insert(annotation);
 
@@ -150,12 +171,45 @@ class AnnotationService {
 
   /// Gets all annotations for an image
   Future<List<Annotation>> getAnnotationsForImage(String imageId) async {
-    return await _annotationDao.getByImage(imageId);
+    try {
+      return await _annotationDao.getByImage(imageId);
+    } catch (e) {
+      // Log error, attempt cleanup, and return empty list if there are corrupted annotations
+      debugPrint('Error loading annotations for image $imageId: $e');
+      debugPrint('Attempting to clean up corrupted annotations...');
+      await cleanupCorruptedAnnotations();
+
+      // Try again after cleanup
+      try {
+        return await _annotationDao.getByImage(imageId);
+      } catch (e2) {
+        debugPrint('Still error after cleanup: $e2');
+        return [];
+      }
+    }
   }
 
   /// Gets all annotations for a project
   Future<List<Annotation>> getAnnotationsForProject(String projectId) async {
-    return await _annotationDao.getByProject(projectId);
+    try {
+      return await _annotationDao.getByProject(projectId);
+    } catch (e) {
+      // Log error and return empty list if there are corrupted annotations
+      debugPrint('Error loading annotations for project $projectId: $e');
+      return [];
+    }
+  }
+
+  /// Cleans up corrupted annotations from the database
+  Future<int> cleanupCorruptedAnnotations() async {
+    try {
+      final deletedCount = await _annotationDao.cleanupCorruptedAnnotations();
+      debugPrint('Cleaned up $deletedCount corrupted annotations');
+      return deletedCount;
+    } catch (e) {
+      debugPrint('Error cleaning up corrupted annotations: $e');
+      return 0;
+    }
   }
 
   /// Converts database annotation to canvas annotation

@@ -490,16 +490,29 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
                 fontWeight: FontWeight.w500,
               ),
             ),
-            if (widget.selectedImage!.annotationCount > 0)
-              TextButton.icon(
-                onPressed: () => _showDeleteAllAnnotationsDialog(context),
-                icon: const Icon(Icons.delete_sweep, size: 16),
-                label: const Text('Clear All'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Cleanup button for corrupted annotations
+                IconButton(
+                  onPressed: () => _cleanupCorruptedAnnotations(context),
+                  icon: const Icon(Icons.cleaning_services, size: 16),
+                  tooltip: 'Clean up corrupted annotations',
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
-              ),
+                if (widget.selectedImage!.annotationCount > 0)
+                  TextButton.icon(
+                    onPressed: () => _showDeleteAllAnnotationsDialog(context),
+                    icon: const Icon(Icons.delete_sweep, size: 16),
+                    label: const Text('Clear All'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
         const SizedBox(height: 8),
@@ -584,12 +597,86 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
 
   /// Builds an annotation card
   Widget _buildAnnotationCard(BuildContext context, Annotation annotation, int index) {
-    // Get label for this annotation
+    // Get label for this annotation - with null safety check
     final labelsAsync = ref.watch(projectLabelsNotifierProvider(widget.project.id));
+    final labelId = annotation.labelId;
+
+    // Handle case where labelId might be null or empty
+    if (labelId.isEmpty) {
+      return Card(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: ListTile(
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          leading: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$index',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: Colors.grey,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ],
+          ),
+          title: Text(
+            'Invalid Annotation',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w500,
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
+          subtitle: Row(
+            children: [
+              Icon(
+                _getAnnotationTypeIcon(annotation.type),
+                size: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'No label assigned',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
+          ),
+          trailing: PopupMenuButton<String>(
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete, size: 16, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text('Delete', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
+              ),
+            ],
+            onSelected: (value) => _handleAnnotationAction(context, annotation, value),
+            padding: EdgeInsets.zero,
+            icon: const Icon(Icons.more_vert, size: 16),
+          ),
+        ),
+      );
+    }
+
     final label = labelsAsync.firstWhere(
-      (l) => l.id == annotation.labelId,
+      (l) => l.id == labelId,
       orElse: () => Label(
-        id: annotation.labelId,
+        id: labelId,
         name: 'Unknown Label',
         color: Colors.grey,
         projectId: widget.project.id,
@@ -1015,6 +1102,32 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
   /// Formats DateTime to readable string
   String _formatDateTime(DateTime dateTime) {
     return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// Cleans up corrupted annotations
+  Future<void> _cleanupCorruptedAnnotations(BuildContext context) async {
+    try {
+      final annotationService = ref.read(annotationServiceProvider);
+      final deletedCount = await annotationService.cleanupCorruptedAnnotations();
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Cleaned up $deletedCount corrupted annotations')),
+        );
+
+        // Refresh annotations list
+        ref.read(imageAnnotationsNotifierProvider(widget.selectedImage!.id).notifier).refresh();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error cleaning up annotations: ${e.toString()}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
   }
 
   /// Formats file size in human readable format

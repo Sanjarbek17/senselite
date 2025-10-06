@@ -42,7 +42,9 @@ class ImageAnnotationsNotifier extends StateNotifier<AsyncValue<List<Annotation>
   Future<void> _loadAnnotations() async {
     try {
       final annotations = await _annotationService.getAnnotationsForImage(_imageId);
-      state = AsyncValue.data(annotations);
+      // Filter out any null or invalid annotations
+      final validAnnotations = annotations.where((annotation) => annotation.id.isNotEmpty && annotation.labelId.isNotEmpty && annotation.imageId.isNotEmpty && annotation.projectId.isNotEmpty).toList();
+      state = AsyncValue.data(validAnnotations);
     } catch (error, stackTrace) {
       state = AsyncValue.error(error, stackTrace);
     }

@@ -94,6 +94,53 @@ class AnnotationDao {
     );
   }
 
+  /// Cleans up corrupted annotations from the database
+  Future<int> cleanupCorruptedAnnotations() async {
+    final db = await _databaseHelper.database;
+    int totalDeleted = 0;
+
+    // First, delete annotations with null or empty required fields at database level
+    final basicDeleted = await db.delete(
+      'annotations',
+      where: '''
+        id IS NULL OR id = '' OR
+        type IS NULL OR type = '' OR
+        label_id IS NULL OR label_id = '' OR
+        image_id IS NULL OR image_id = '' OR
+        project_id IS NULL OR project_id = '' OR
+        data IS NULL OR data = ''
+      ''',
+    );
+    totalDeleted += basicDeleted;
+
+    // Now check for JSON parsing issues by attempting to parse each annotation
+    final allMaps = await db.query('annotations');
+    final corruptedIds = <String>[];
+
+    for (final map in allMaps) {
+      try {
+        _annotationFromMap(map);
+      } catch (e) {
+        final id = map['id'] as String?;
+        if (id != null) {
+          corruptedIds.add(id);
+        }
+      }
+    }
+
+    // Delete corrupted annotations
+    for (final id in corruptedIds) {
+      await db.delete(
+        'annotations',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      totalDeleted++;
+    }
+
+    return totalDeleted;
+  }
+
   /// Retrieves an annotation by its ID
   Future<Annotation?> getById(String annotationId) async {
     final db = await _databaseHelper.database;
@@ -118,7 +165,18 @@ class AnnotationDao {
       whereArgs: [imageId],
       orderBy: 'created_at ASC',
     );
-    return maps.map((map) => _annotationFromMap(map)).toList();
+
+    final annotations = <Annotation>[];
+    for (final map in maps) {
+      try {
+        final annotation = _annotationFromMap(map);
+        annotations.add(annotation);
+      } catch (e) {
+        // Skip corrupted annotation and log error
+        print('Warning: Skipping corrupted annotation with id ${map['id']}: $e');
+      }
+    }
+    return annotations;
   }
 
   /// Retrieves all annotations for a project
@@ -130,7 +188,18 @@ class AnnotationDao {
       whereArgs: [projectId],
       orderBy: 'created_at ASC',
     );
-    return maps.map((map) => _annotationFromMap(map)).toList();
+
+    final annotations = <Annotation>[];
+    for (final map in maps) {
+      try {
+        final annotation = _annotationFromMap(map);
+        annotations.add(annotation);
+      } catch (e) {
+        // Skip corrupted annotation and log error
+        print('Warning: Skipping corrupted annotation with id ${map['id']}: $e');
+      }
+    }
+    return annotations;
   }
 
   /// Retrieves all annotations for a specific label
@@ -206,6 +275,22 @@ class AnnotationDao {
 
   /// Converts an Annotation object to a database map
   Map<String, dynamic> _annotationToMap(Annotation annotation) {
+    // Validate annotation before saving
+    if (annotation.id.isEmpty || annotation.labelId.isEmpty || annotation.imageId.isEmpty || annotation.projectId.isEmpty) {
+      throw ArgumentError(
+        'Cannot save annotation with empty required fields: '
+        'id=${annotation.id}, labelId=${annotation.labelId}, '
+        'imageId=${annotation.imageId}, projectId=${annotation.projectId}',
+      );
+    }
+
+    final jsonData = annotation.toJson();
+
+    // Ensure the JSON contains the type field
+    if (!jsonData.containsKey('type') || jsonData['type'] == null) {
+      jsonData['type'] = annotation.type.name;
+    }
+
     return {
       'id': annotation.id,
       'type': annotation.type.name,
@@ -215,13 +300,29 @@ class AnnotationDao {
       'created_at': annotation.createdAt.millisecondsSinceEpoch,
       'updated_at': annotation.updatedAt.millisecondsSinceEpoch,
       'notes': annotation.notes,
-      'data': jsonEncode(annotation.toJson()),
+      'data': jsonEncode(jsonData),
     };
   }
 
   /// Converts a database map to an Annotation object
   Annotation _annotationFromMap(Map<String, dynamic> map) {
-    final data = jsonDecode(map['data'] as String) as Map<String, dynamic>;
-    return Annotation.fromJson(data);
+    // Validate required fields
+    final id = map['id'] as String?;
+    final type = map['type'] as String?;
+    final labelId = map['label_id'] as String?;
+    final imageId = map['image_id'] as String?;
+    final projectId = map['project_id'] as String?;
+    final dataString = map['data'] as String?;
+
+    if (id == null || id.isEmpty || type == null || type.isEmpty || labelId == null || labelId.isEmpty || imageId == null || imageId.isEmpty || projectId == null || projectId.isEmpty || dataString == null || dataString.isEmpty) {
+      throw ArgumentError('Invalid annotation data: required fields are null or empty. ID: $id, Type: $type, LabelID: $labelId, ImageID: $imageId, ProjectID: $projectId');
+    }
+
+    try {
+      final data = jsonDecode(dataString) as Map<String, dynamic>;
+      return Annotation.fromJson(data);
+    } catch (e) {
+      throw ArgumentError('Failed to parse annotation JSON data: $e');
+    }
   }
 }

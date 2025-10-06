@@ -59,7 +59,12 @@ abstract class Annotation {
 
   /// Creates an Annotation from JSON data
   factory Annotation.fromJson(Map<String, dynamic> json) {
-    final type = AnnotationType.values.byName(json['type'] as String);
+    final typeString = json['type'] as String?;
+    if (typeString == null || typeString.isEmpty) {
+      throw ArgumentError('Invalid annotation: type field is null or empty');
+    }
+
+    final type = AnnotationType.values.byName(typeString);
     switch (type) {
       case AnnotationType.boundingBox:
         return BoundingBoxAnnotation.fromJson(json);
@@ -142,7 +147,11 @@ class BoundingBoxAnnotation extends Annotation {
   factory BoundingBoxAnnotation.fromJson(Map<String, dynamic> json) => _$BoundingBoxAnnotationFromJson(json);
 
   @override
-  Map<String, dynamic> toJson() => _$BoundingBoxAnnotationToJson(this);
+  Map<String, dynamic> toJson() {
+    final json = _$BoundingBoxAnnotationToJson(this);
+    json['type'] = type.name;
+    return json;
+  }
 
   /// Creates a copy of this BoundingBoxAnnotation with updated fields
   BoundingBoxAnnotation copyWith({
@@ -201,7 +210,11 @@ class PolygonAnnotation extends Annotation {
   factory PolygonAnnotation.fromJson(Map<String, dynamic> json) => _$PolygonAnnotationFromJson(json);
 
   @override
-  Map<String, dynamic> toJson() => _$PolygonAnnotationToJson(this);
+  Map<String, dynamic> toJson() {
+    final json = _$PolygonAnnotationToJson(this);
+    json['type'] = type.name;
+    return json;
+  }
 
   /// Creates a copy of this PolygonAnnotation with updated fields
   PolygonAnnotation copyWith({
@@ -254,7 +267,11 @@ class KeypointAnnotation extends Annotation {
   factory KeypointAnnotation.fromJson(Map<String, dynamic> json) => _$KeypointAnnotationFromJson(json);
 
   @override
-  Map<String, dynamic> toJson() => _$KeypointAnnotationToJson(this);
+  Map<String, dynamic> toJson() {
+    final json = _$KeypointAnnotationToJson(this);
+    json['type'] = type.name;
+    return json;
+  }
 
   /// Creates a copy of this KeypointAnnotation with updated fields
   KeypointAnnotation copyWith({
