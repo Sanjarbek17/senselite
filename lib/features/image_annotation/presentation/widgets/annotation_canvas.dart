@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/image_item.dart';
 import '../../../../core/models/project.dart';
+import '../../../../core/models/annotation.dart';
 import '../../../../core/providers/label_providers.dart';
 import '../../../../core/providers/project_providers.dart';
 import '../../providers/annotation_providers.dart';
@@ -93,6 +94,12 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
   CanvasAnnotation? _selectedAnnotation;
   final GlobalKey _imageKey = GlobalKey();
   Size _imageSize = Size.zero;
+
+  /// Editing state
+  bool _isDraggingAnnotation = false;
+  CanvasAnnotation? _draggingAnnotation;
+  Offset _dragStartPoint = Offset.zero;
+  List<Offset> _originalPoints = [];
 
   @override
   void initState() {
@@ -454,6 +461,8 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
 
   /// Handles pan start for drawing
   void _onPanStart(DragStartDetails details) {
+    final drawingState = ref.read(drawingStateNotifierProvider);
+
     // Check if clicking on an existing annotation for selection
     final clickedAnnotation = _getAnnotationAtPoint(details.localPosition);
 
@@ -462,6 +471,17 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
       setState(() {
         _selectedAnnotation = clickedAnnotation;
       });
+
+      // If in edit mode, start dragging the annotation
+      if (drawingState.mode == CanvasMode.editing) {
+        setState(() {
+          _isDraggingAnnotation = true;
+          _draggingAnnotation = clickedAnnotation;
+          _dragStartPoint = details.localPosition;
+          _originalPoints = List.from(clickedAnnotation.points);
+        });
+      }
+
       // Clear any current drawing
       ref.read(drawingStateNotifierProvider.notifier).clearDrawing();
       return;
@@ -474,20 +494,57 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
       });
     }
 
-    // Start drawing only if a tool is selected
-    final drawingState = ref.read(drawingStateNotifierProvider);
-    if (drawingState.tool == AnnotationTool.none) return;
+    // Start drawing only if a tool is selected and in drawing mode
+    if (drawingState.tool == AnnotationTool.none || drawingState.mode != CanvasMode.drawing) return;
 
     ref.read(drawingStateNotifierProvider.notifier).startDrawing(details.localPosition);
   }
 
   /// Handles pan update for drawing
   void _onPanUpdate(DragUpdateDetails details) {
+    // Handle annotation dragging
+    if (_isDraggingAnnotation && _draggingAnnotation != null) {
+      final dragDelta = details.localPosition - _dragStartPoint;
+
+      if (_draggingAnnotation!.tool == AnnotationTool.boundingBox) {
+        // Move the entire bounding box
+        final newPoints = _originalPoints.map((point) => point + dragDelta).toList();
+
+        final updatedAnnotation = _draggingAnnotation!.copyWith(points: newPoints);
+
+        setState(() {
+          final index = _annotations.indexWhere((a) => a.id == _draggingAnnotation!.id);
+          if (index != -1) {
+            _annotations[index] = updatedAnnotation;
+            _selectedAnnotation = updatedAnnotation;
+            _draggingAnnotation = updatedAnnotation;
+          }
+        });
+      }
+      return;
+    }
+
+    // Handle normal drawing
     ref.read(drawingStateNotifierProvider.notifier).updateDrawing(details.localPosition);
   }
 
   /// Handles pan end for drawing
   void _onPanEnd(DragEndDetails details) {
+    // Handle end of annotation dragging
+    if (_isDraggingAnnotation && _draggingAnnotation != null) {
+      // Save the updated annotation to database
+      _saveUpdatedAnnotationToDatabase(_draggingAnnotation!);
+
+      setState(() {
+        _isDraggingAnnotation = false;
+        _draggingAnnotation = null;
+        _dragStartPoint = Offset.zero;
+        _originalPoints = [];
+      });
+      return;
+    }
+
+    // Handle normal drawing
     final drawingState = ref.read(drawingStateNotifierProvider);
 
     if (!drawingState.isDrawing || drawingState.tool == AnnotationTool.none || drawingState.points.length < 2) {
@@ -646,6 +703,18 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
       if (mounted) {
         setState(() {
           _annotations.clear();
+
+          // Ensure we have image size before converting annotations
+          if (_imageSize == Size.zero) {
+            final RenderBox? renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+            if (renderBox != null) {
+              _imageSize = renderBox.size;
+            } else {
+              // Fallback to image item dimensions
+              _imageSize = Size(widget.imageItem.width.toDouble(), widget.imageItem.height.toDouble());
+            }
+          }
+
           for (final annotation in annotations) {
             // Convert database annotation to canvas annotation
             final canvasAnnotation = annotationService.convertToCanvasAnnotation(annotation, _imageSize);
@@ -702,6 +771,112 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error saving annotation: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Saves an updated canvas annotation to the database
+  Future<void> _saveUpdatedAnnotationToDatabase(CanvasAnnotation canvasAnnotation) async {
+    try {
+      // Find the corresponding database annotation
+      final annotationService = ref.read(annotationServiceProvider);
+      final existingAnnotations = await annotationService.getAnnotationsForImage(widget.imageItem.id);
+      final dbAnnotation = existingAnnotations.firstWhere((a) => a.id == canvasAnnotation.id);
+
+      if (_imageSize == Size.zero) {
+        // Try to get image size from the widget
+        final RenderBox? renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+        if (renderBox != null) {
+          _imageSize = renderBox.size;
+        } else {
+          // Fallback to image item dimensions
+          _imageSize = Size(widget.imageItem.width.toDouble(), widget.imageItem.height.toDouble());
+        }
+      }
+
+      // Convert canvas coordinates to normalized coordinates (0.0 to 1.0)
+      final normalizedPoints = canvasAnnotation.points
+          .map(
+            (point) => Point(
+              x: point.dx / _imageSize.width,
+              y: point.dy / _imageSize.height,
+            ),
+          )
+          .toList();
+
+      // Update the annotation based on its type
+      Annotation updatedAnnotation;
+      switch (canvasAnnotation.tool) {
+        case AnnotationTool.boundingBox:
+          if (canvasAnnotation.points.length < 2) return;
+          final topLeft = canvasAnnotation.points.first;
+          final bottomRight = canvasAnnotation.points.last;
+
+          final x = (topLeft.dx / _imageSize.width).clamp(0.0, 1.0);
+          final y = (topLeft.dy / _imageSize.height).clamp(0.0, 1.0);
+          final width = ((bottomRight.dx - topLeft.dx).abs() / _imageSize.width).clamp(0.0, 1.0 - x);
+          final height = ((bottomRight.dy - topLeft.dy).abs() / _imageSize.height).clamp(0.0, 1.0 - y);
+
+          updatedAnnotation = (dbAnnotation as BoundingBoxAnnotation).copyWith(
+            x: x,
+            y: y,
+            width: width,
+            height: height,
+            updatedAt: DateTime.now(),
+          );
+          break;
+        case AnnotationTool.polygon:
+          updatedAnnotation = (dbAnnotation as PolygonAnnotation).copyWith(
+            points: normalizedPoints,
+            updatedAt: DateTime.now(),
+          );
+          break;
+        case AnnotationTool.keypoint:
+          final keypoints = normalizedPoints
+              .asMap()
+              .entries
+              .map(
+                (entry) => Keypoint(
+                  name: 'keypoint_${entry.key + 1}',
+                  point: entry.value,
+                  visibility: 1, // 1 = visible
+                ),
+              )
+              .toList();
+
+          updatedAnnotation = (dbAnnotation as KeypointAnnotation).copyWith(
+            keypoints: keypoints,
+            updatedAt: DateTime.now(),
+          );
+          break;
+        case AnnotationTool.none:
+          return;
+      }
+
+      await annotationService.updateAnnotation(updatedAnnotation);
+
+      // Refresh the annotations notifier if being used
+      if (ref.exists(imageAnnotationsNotifierProvider(widget.imageItem.id))) {
+        ref.read(imageAnnotationsNotifierProvider(widget.imageItem.id).notifier).refresh();
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${canvasAnnotation.tool.name} annotation updated!'),
+            duration: const Duration(seconds: 1),
+            backgroundColor: Colors.green.withValues(alpha: 0.8),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating annotation: $e'),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
