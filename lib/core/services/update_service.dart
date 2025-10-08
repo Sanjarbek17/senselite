@@ -26,7 +26,7 @@ class UpdateService {
   static const String _checkIntervalKey = 'update_check_interval_hours';
 
   /// Default update check URL - replace with your actual update server
-  static const String _defaultUpdateUrl = 'https://your-server.com/api/updates/check';
+  static const String _defaultUpdateUrl = 'https://sanjarbek17.uz/api/updates/check';
 
   /// Default check interval in hours
   static const int _defaultCheckInterval = 24;

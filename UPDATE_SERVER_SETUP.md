@@ -8,7 +8,7 @@ The update service expects a REST API endpoint that responds to GET requests wit
 
 ### Default URL Structure
 ```
-https://your-server.com/api/updates/check
+https://sanjarbek17.uz/api/updates/check
 ```
 
 ## API Response Format
@@ -18,7 +18,7 @@ https://your-server.com/api/updates/check
 {
   "version": "1.1.0",
   "buildNumber": 2,
-  "downloadUrl": "https://your-server.com/downloads/senselite-1.1.0-setup.exe",
+  "downloadUrl": "https://sanjarbek17.uz/downloads/senselite-1.1.0-setup.exe",
   "checksum": "sha256:abcd1234efgh5678...",
   "fileSize": 52428800,
   "releaseNotes": "• Added new image annotation features\n• Fixed performance issues\n• Updated UI theme\n• Bug fixes and improvements",
@@ -64,7 +64,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = 'your-secret-key-here'
 DEBUG = False  # Set to False in production
-ALLOWED_HOSTS = ['your-server.com', 'localhost']
+ALLOWED_HOSTS = ['sanjarbek17.uz', 'localhost']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -342,13 +342,13 @@ python manage.py runserver 0.0.0.0:8000
 # /etc/nginx/sites-available/senselite-updates
 server {
     listen 80;
-    server_name your-server.com;
+    server_name sanjarbek17.uz;
     return 301 https://$server_name$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name your-server.com;
+    server_name sanjarbek17.uz;
     
     ssl_certificate /path/to/your/certificate.crt;
     ssl_certificate_key /path/to/your/private.key;
@@ -388,7 +388,7 @@ app.get('/api/updates/check', (req, res) => {
     const latestVersion = {
         version: '1.1.0',
         buildNumber: 2,
-        downloadUrl: 'https://your-server.com/downloads/senselite-1.1.0-setup.exe',
+        downloadUrl: 'https://sanjarbek17.uz/downloads/senselite-1.1.0-setup.exe',
         checksum: 'sha256:your-actual-sha256-checksum-here',
         fileSize: 52428800,
         releaseNotes: '• Added new image annotation features\n• Fixed performance issues\n• Updated UI theme\n• Bug fixes and improvements',
@@ -453,5 +453,5 @@ To configure the update URL in your SenseLite application:
 Alternatively, modify the `_defaultUpdateUrl` constant in `update_service.dart`:
 
 ```dart
-static const String _defaultUpdateUrl = 'https://your-server.com/api/updates/check';
+static const String _defaultUpdateUrl = 'https://sanjarbek17.uz/api/updates/check';
 ```
