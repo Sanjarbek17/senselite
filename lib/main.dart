@@ -13,7 +13,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 import 'core/constants/app_constants.dart';
+import 'core/providers/update_provider.dart';
 import 'features/project_management/presentation/project_home_page.dart';
+import 'features/settings/presentation/widgets/update_notification_banner.dart';
 
 /// Main entry point of the SenseLite application
 void main() async {
@@ -43,21 +45,62 @@ void main() async {
 }
 
 /// Root application widget
-class SenseLiteApp extends ConsumerWidget {
+class SenseLiteApp extends ConsumerStatefulWidget {
   const SenseLiteApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SenseLiteApp> createState() => _SenseLiteAppState();
+}
+
+class _SenseLiteAppState extends ConsumerState<SenseLiteApp> {
+  @override
+  void initState() {
+    super.initState();
+    // Perform automatic update check on app startup (delayed to allow UI to load)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) {
+          ref.read(updateNotifierProvider.notifier).performAutoUpdateCheck();
+        }
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return MaterialApp(
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
       theme: _buildLightTheme(),
       darkTheme: _buildDarkTheme(),
       themeMode: ThemeMode.system,
-      home: const ProjectHomePage(),
+      home: const MainAppScaffold(),
     );
   }
+}
 
+/// Main application scaffold that includes the update notification banner
+class MainAppScaffold extends ConsumerWidget {
+  const MainAppScaffold({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(
+      body: Column(
+        children: [
+          // Update notification banner at the top
+          const UpdateNotificationBanner(),
+          // Main content area
+          const Expanded(
+            child: ProjectHomePage(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+extension _SenseLiteAppThemes on _SenseLiteAppState {
   /// Builds the light theme for the application
   ThemeData _buildLightTheme() {
     return ThemeData(

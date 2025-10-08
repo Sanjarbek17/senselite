@@ -106,3 +106,26 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# Configure application metadata for update system
+set(SENSELITE_VERSION_MAJOR 1)
+set(SENSELITE_VERSION_MINOR 0)
+set(SENSELITE_VERSION_PATCH 0)
+set(SENSELITE_VERSION_BUILD 1)
+
+# Set executable properties for Windows
+set_target_properties(${BINARY_NAME} PROPERTIES
+    WIN32_EXECUTABLE TRUE
+)
+
+# Add version information to the executable
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/runner/version.rc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/version.rc"
+    @ONLY
+)
+
+# Include version resource if it exists
+if(EXISTS "${CMAKE_CURRENT_BINARY_DIR}/version.rc")
+    target_sources(${BINARY_NAME} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/version.rc")
+endif()

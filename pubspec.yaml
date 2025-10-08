@@ -57,10 +57,15 @@ dependencies:
   # UI and Utils
   flutter_colorpicker: ^1.1.0
   uuid: ^4.5.0
-  json_annotation: ^4.9.0
   
   # Settings and Preferences
   shared_preferences: ^2.3.2
+  
+  # Update System
+  http: ^1.2.2
+  archive: ^3.6.1
+  crypto: ^3.0.5
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:
@@ -72,10 +77,6 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
-  
-  # Code Generation
-  build_runner: ^2.4.12
-  json_serializable: ^6.8.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
