@@ -15,6 +15,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/providers/project_providers.dart';
 import '../../../core/models/project.dart';
 import '../../image_annotation/presentation/annotation_workspace_page.dart';
+import '../../settings/presentation/settings_page.dart';
 import 'widgets/project_card.dart';
 import 'widgets/new_project_dialog.dart';
 
@@ -55,6 +56,11 @@ class _ProjectHomePageState extends ConsumerState<ProjectHomePage> {
             onPressed: () => _openProject(context),
             icon: const Icon(Icons.folder_open),
             tooltip: 'Open Project',
+          ),
+          IconButton(
+            onPressed: () => _openSettings(context),
+            icon: const Icon(Icons.settings),
+            tooltip: 'Settings',
           ),
           const SizedBox(width: 8),
         ],
@@ -282,6 +288,15 @@ class _ProjectHomePageState extends ConsumerState<ProjectHomePage> {
         );
       }
     }
+  }
+
+  /// Opens the settings page
+  void _openSettings(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const SettingsPage(),
+      ),
+    );
   }
 
   /// Deletes a project
