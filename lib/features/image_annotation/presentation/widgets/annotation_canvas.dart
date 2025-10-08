@@ -101,6 +101,10 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
   Offset _dragStartPoint = Offset.zero;
   List<Offset> _originalPoints = [];
 
+  /// Resize state
+  bool _isResizing = false;
+  String? _resizeHandle; // 'topLeft', 'topRight', 'bottomLeft', 'bottomRight'
+
   @override
   void initState() {
     super.initState();
@@ -463,6 +467,23 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
   void _onPanStart(DragStartDetails details) {
     final drawingState = ref.read(drawingStateNotifierProvider);
 
+    // If we have a selected annotation in edit mode, check for resize handles first
+    if (_selectedAnnotation != null && drawingState.mode == CanvasMode.editing) {
+      final handle = _getResizeHandleAtPoint(details.localPosition, _selectedAnnotation!);
+      if (handle != null) {
+        // Start resizing
+        setState(() {
+          _isResizing = true;
+          _resizeHandle = handle;
+          _dragStartPoint = details.localPosition;
+          _originalPoints = List.from(_selectedAnnotation!.points);
+          _draggingAnnotation = _selectedAnnotation;
+        });
+        ref.read(drawingStateNotifierProvider.notifier).clearDrawing();
+        return;
+      }
+    }
+
     // Check if clicking on an existing annotation for selection
     final clickedAnnotation = _getAnnotationAtPoint(details.localPosition);
 
@@ -472,13 +493,15 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
         _selectedAnnotation = clickedAnnotation;
       });
 
-      // If in edit mode, start dragging the annotation
+      // If in edit mode, start dragging the annotation (moving, not resizing)
       if (drawingState.mode == CanvasMode.editing) {
         setState(() {
           _isDraggingAnnotation = true;
           _draggingAnnotation = clickedAnnotation;
           _dragStartPoint = details.localPosition;
           _originalPoints = List.from(clickedAnnotation.points);
+          _isResizing = false;
+          _resizeHandle = null;
         });
       }
 
@@ -502,8 +525,28 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
 
   /// Handles pan update for drawing
   void _onPanUpdate(DragUpdateDetails details) {
-    // Handle annotation dragging
-    if (_isDraggingAnnotation && _draggingAnnotation != null) {
+    // Handle annotation resizing
+    if (_isResizing && _draggingAnnotation != null && _resizeHandle != null) {
+      final currentPoint = details.localPosition;
+      final newPoints = _calculateResizedPoints(_originalPoints, _resizeHandle!, currentPoint);
+
+      if (newPoints.length == 2) {
+        final updatedAnnotation = _draggingAnnotation!.copyWith(points: newPoints);
+
+        setState(() {
+          final index = _annotations.indexWhere((a) => a.id == _draggingAnnotation!.id);
+          if (index != -1) {
+            _annotations[index] = updatedAnnotation;
+            _selectedAnnotation = updatedAnnotation;
+            _draggingAnnotation = updatedAnnotation;
+          }
+        });
+      }
+      return;
+    }
+
+    // Handle annotation dragging (moving)
+    if (_isDraggingAnnotation && _draggingAnnotation != null && !_isResizing) {
       final dragDelta = details.localPosition - _dragStartPoint;
 
       if (_draggingAnnotation!.tool == AnnotationTool.boundingBox) {
@@ -530,13 +573,15 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
 
   /// Handles pan end for drawing
   void _onPanEnd(DragEndDetails details) {
-    // Handle end of annotation dragging
-    if (_isDraggingAnnotation && _draggingAnnotation != null) {
+    // Handle end of annotation resizing or dragging
+    if ((_isDraggingAnnotation || _isResizing) && _draggingAnnotation != null) {
       // Save the updated annotation to database
       _saveUpdatedAnnotationToDatabase(_draggingAnnotation!);
 
       setState(() {
         _isDraggingAnnotation = false;
+        _isResizing = false;
+        _resizeHandle = null;
         _draggingAnnotation = null;
         _dragStartPoint = Offset.zero;
         _originalPoints = [];
@@ -663,6 +708,92 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
     }
 
     return inside;
+  }
+
+  /// Detects if a point is on a resize handle for the given annotation
+  String? _getResizeHandleAtPoint(Offset point, CanvasAnnotation annotation) {
+    if (annotation.tool != AnnotationTool.boundingBox || annotation.points.length < 2) {
+      return null;
+    }
+
+    final rect = Rect.fromPoints(annotation.points[0], annotation.points[1]);
+    const handleSize = 8.0; // Increased from 6.0 for easier interaction
+
+    // Check each corner handle
+    if (_isPointNearHandle(point, rect.topLeft, handleSize)) return 'topLeft';
+    if (_isPointNearHandle(point, rect.topRight, handleSize)) return 'topRight';
+    if (_isPointNearHandle(point, rect.bottomLeft, handleSize)) return 'bottomLeft';
+    if (_isPointNearHandle(point, rect.bottomRight, handleSize)) return 'bottomRight';
+
+    return null;
+  }
+
+  /// Checks if a point is near a handle position
+  bool _isPointNearHandle(Offset point, Offset handleCenter, double handleSize) {
+    return (point - handleCenter).distance <= handleSize;
+  }
+
+  /// Calculates new points for resizing based on the handle being dragged
+  List<Offset> _calculateResizedPoints(List<Offset> originalPoints, String handle, Offset currentPoint) {
+    if (originalPoints.length < 2) return originalPoints;
+
+    final topLeft = originalPoints[0];
+    final bottomRight = originalPoints[1];
+
+    // Create a proper rectangle from the original points
+    final left = math.min(topLeft.dx, bottomRight.dx);
+    final top = math.min(topLeft.dy, bottomRight.dy);
+    final right = math.max(topLeft.dx, bottomRight.dx);
+    final bottom = math.max(topLeft.dy, bottomRight.dy);
+
+    double newLeft = left;
+    double newTop = top;
+    double newRight = right;
+    double newBottom = bottom;
+
+    // Update coordinates based on which handle is being dragged
+    switch (handle) {
+      case 'topLeft':
+        newLeft = currentPoint.dx;
+        newTop = currentPoint.dy;
+        break;
+      case 'topRight':
+        newRight = currentPoint.dx;
+        newTop = currentPoint.dy;
+        break;
+      case 'bottomLeft':
+        newLeft = currentPoint.dx;
+        newBottom = currentPoint.dy;
+        break;
+      case 'bottomRight':
+        newRight = currentPoint.dx;
+        newBottom = currentPoint.dy;
+        break;
+    }
+
+    // Ensure minimum size (10x10 pixels)
+    const minSize = 10.0;
+    if ((newRight - newLeft).abs() < minSize) {
+      if (handle.contains('Left')) {
+        newLeft = newRight - minSize;
+      } else {
+        newRight = newLeft + minSize;
+      }
+    }
+
+    if ((newBottom - newTop).abs() < minSize) {
+      if (handle.contains('top')) {
+        newTop = newBottom - minSize;
+      } else {
+        newBottom = newTop + minSize;
+      }
+    }
+
+    // Return new points as [topLeft, bottomRight]
+    return [
+      Offset(math.min(newLeft, newRight), math.min(newTop, newBottom)),
+      Offset(math.max(newLeft, newRight), math.max(newTop, newBottom)),
+    ];
   }
 
   /// Resets the canvas state when switching to a new image
@@ -983,17 +1114,33 @@ class DrawingPainter extends CustomPainter {
     final rect = Rect.fromPoints(start, end);
     canvas.drawRect(rect, paint);
 
-    // Draw corner handles only for selected annotations
+    // Draw corner handles only for selected annotations in edit mode
     if (showHandles) {
+      const handleSize = 8.0; // Increased size for easier interaction
+
+      // Draw white outline for handles
+      final outlinePaint = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0;
+
+      // Draw filled handle
       final handlePaint = Paint()
         ..color = paint.color
         ..style = PaintingStyle.fill;
 
-      const handleSize = 6.0;
+      // Draw each corner handle with outline
       canvas.drawCircle(rect.topLeft, handleSize, handlePaint);
+      canvas.drawCircle(rect.topLeft, handleSize, outlinePaint);
+
       canvas.drawCircle(rect.topRight, handleSize, handlePaint);
+      canvas.drawCircle(rect.topRight, handleSize, outlinePaint);
+
       canvas.drawCircle(rect.bottomLeft, handleSize, handlePaint);
+      canvas.drawCircle(rect.bottomLeft, handleSize, outlinePaint);
+
       canvas.drawCircle(rect.bottomRight, handleSize, handlePaint);
+      canvas.drawCircle(rect.bottomRight, handleSize, outlinePaint);
     }
   }
 
