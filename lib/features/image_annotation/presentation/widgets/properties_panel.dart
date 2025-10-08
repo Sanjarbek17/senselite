@@ -15,6 +15,7 @@ import '../../../../core/models/project.dart';
 import '../../../../core/models/label.dart';
 import '../../../../core/models/annotation.dart';
 import '../../../../core/providers/label_providers.dart';
+import '../../../../core/providers/project_providers.dart';
 import '../../../label_management/presentation/widgets/label_dialog.dart';
 import '../../providers/annotation_providers.dart';
 
@@ -115,7 +116,13 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
 
           // Content
           Expanded(
-            child: widget.selectedImage != null ? _buildImageProperties(context) : _buildNoSelectionState(context),
+            child: widget.selectedImage != null
+                ? _buildImageProperties(
+                    context,
+                  )
+                : _buildNoSelectionState(
+                    context,
+                  ),
           ),
         ],
       ),
@@ -124,26 +131,11 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
 
   /// Builds the properties display for selected image
   Widget _buildImageProperties(BuildContext context) {
-    final image = widget.selectedImage!;
+    // final image = widget.selectedImage!;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Image info section
-        _buildSection(
-          context,
-          'Image Information',
-          [
-            _buildInfoRow(context, 'Filename', image.filename),
-            _buildInfoRow(context, 'Dimensions', '${image.width} × ${image.height}'),
-            _buildInfoRow(context, 'File Size', _formatFileSize(image.fileSize)),
-            _buildInfoRow(context, 'Annotated', image.isAnnotated ? 'Yes' : 'No'),
-            _buildInfoRow(context, 'Annotations', '${image.annotationCount}'),
-          ],
-        ),
-
-        const SizedBox(height: 24),
-
         // Labels section
         _buildSection(
           context,
@@ -213,34 +205,6 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
         const SizedBox(height: 12),
         ...children,
       ],
-    );
-  }
-
-  /// Builds an information row
-  Widget _buildInfoRow(BuildContext context, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 80,
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w500,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -891,6 +855,13 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
           FilledButton(
             onPressed: () {
               Navigator.of(context).pop();
+              _showEditAnnotationLabelDialog(context, annotation);
+            },
+            child: const Text('Edit Label'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
               _showEditAnnotationNotesDialog(context, annotation);
             },
             child: const Text('Edit Notes'),
@@ -1031,6 +1002,109 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
     );
   }
 
+  /// Shows edit annotation label dialog
+  Future<void> _showEditAnnotationLabelDialog(BuildContext context, Annotation annotation) async {
+    final labels = ref.read(projectLabelsProvider(widget.project.id)).value ?? [];
+    final currentLabel = labels.firstWhere((label) => label.id == annotation.labelId, orElse: () => labels.first);
+    Label? selectedLabel = currentLabel;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Change Label'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Select a new label for this annotation:',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 16),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 300),
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: labels.map((label) {
+                      final isSelected = selectedLabel?.id == label.id;
+                      return ListTile(
+                        leading: Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: label.color,
+                            borderRadius: BorderRadius.circular(4),
+                            border: isSelected ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2) : null,
+                          ),
+                        ),
+                        title: Text(label.name),
+                        subtitle: label.description != null ? Text(label.description!) : null,
+                        selected: isSelected,
+                        onTap: () {
+                          setState(() {
+                            selectedLabel = label;
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: selectedLabel != null && selectedLabel!.id != annotation.labelId ? () => Navigator.of(context).pop(true) : null,
+              child: const Text('Change Label'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true && selectedLabel != null && selectedLabel!.id != annotation.labelId) {
+      try {
+        Annotation updatedAnnotation;
+        switch (annotation.type) {
+          case AnnotationType.boundingBox:
+            updatedAnnotation = (annotation as BoundingBoxAnnotation).copyWith(labelId: selectedLabel!.id);
+            break;
+          case AnnotationType.polygon:
+            updatedAnnotation = (annotation as PolygonAnnotation).copyWith(labelId: selectedLabel!.id);
+            break;
+          case AnnotationType.keypoint:
+            updatedAnnotation = (annotation as KeypointAnnotation).copyWith(labelId: selectedLabel!.id);
+            break;
+        }
+
+        await ref.read(imageAnnotationsNotifierProvider(widget.selectedImage!.id).notifier).updateAnnotation(updatedAnnotation);
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Label changed to "${selectedLabel!.name}"'),
+              backgroundColor: selectedLabel!.color.withValues(alpha: 0.8),
+            ),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error updating label: ${e.toString()}'),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   /// Shows delete annotation confirmation dialog
   Future<void> _showDeleteAnnotationDialog(BuildContext context, Annotation annotation) async {
     final confirmed = await showDialog<bool>(
@@ -1057,6 +1131,10 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
     if (confirmed == true) {
       try {
         await ref.read(imageAnnotationsNotifierProvider(widget.selectedImage!.id).notifier).removeAnnotation(annotation.id);
+
+        // Refresh the project images provider to update annotation status in the image list
+        ref.invalidate(projectImagesProvider(widget.project.id));
+
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Annotation deleted successfully')),
@@ -1104,6 +1182,10 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
         for (final annotation in annotations) {
           await ref.read(imageAnnotationsNotifierProvider(widget.selectedImage!.id).notifier).removeAnnotation(annotation.id);
         }
+
+        // Refresh the project images provider to update annotation status in the image list
+        ref.invalidate(projectImagesProvider(widget.project.id));
+
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('All annotations deleted successfully')),
@@ -1151,13 +1233,5 @@ class _PropertiesPanelState extends ConsumerState<PropertiesPanel> {
         );
       }
     }
-  }
-
-  /// Formats file size in human readable format
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 }

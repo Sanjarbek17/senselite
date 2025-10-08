@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/image_item.dart';
 import '../../../../core/models/project.dart';
 import '../../../../core/providers/label_providers.dart';
+import '../../../../core/providers/project_providers.dart';
 import '../../providers/annotation_providers.dart';
 
 /// Represents a completed annotation on the canvas
@@ -164,6 +165,9 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
                 // Selected label indicator
                 _buildSelectedLabelIndicator(),
                 const Spacer(),
+                // Mode toggle
+                _buildModeToggleButton(),
+                const VerticalDivider(),
                 // Annotation tools
                 _buildToolButton(
                   icon: Icons.crop_free,
@@ -283,6 +287,38 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// Builds the mode toggle button (drawing/editing)
+  Widget _buildModeToggleButton() {
+    final drawingState = ref.watch(drawingStateNotifierProvider);
+    final isEditMode = drawingState.mode == CanvasMode.editing;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      decoration: BoxDecoration(
+        color: isEditMode ? Theme.of(context).colorScheme.secondaryContainer : null,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: IconButton(
+        icon: Icon(
+          isEditMode ? Icons.edit : Icons.draw,
+          color: isEditMode ? Theme.of(context).colorScheme.onSecondaryContainer : null,
+        ),
+        onPressed: () {
+          if (isEditMode) {
+            ref.read(drawingStateNotifierProvider.notifier).exitEditingMode();
+          } else {
+            ref.read(drawingStateNotifierProvider.notifier).startEditingAnnotation('');
+          }
+          // Clear selected annotation when switching modes
+          setState(() {
+            _selectedAnnotation = null;
+          });
+        },
+        tooltip: isEditMode ? 'Switch to Drawing Mode' : 'Switch to Edit Mode',
       ),
     );
   }
@@ -658,6 +694,9 @@ class _AnnotationCanvasState extends ConsumerState<AnnotationCanvas> {
       if (ref.exists(imageAnnotationsNotifierProvider(widget.imageItem.id))) {
         ref.read(imageAnnotationsNotifierProvider(widget.imageItem.id).notifier).refresh();
       }
+
+      // Refresh the project images provider to update annotation status in the image list
+      ref.invalidate(projectImagesProvider(widget.project.id));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -721,15 +760,18 @@ class DrawingPainter extends CustomPainter {
       ..strokeWidth = isSelected ? 3.0 : 2.0
       ..style = PaintingStyle.stroke;
 
+    // Check if we're in edit mode to show handles
+    final showHandles = isSelected && drawingState.mode == CanvasMode.editing;
+
     switch (annotation.tool) {
       case AnnotationTool.boundingBox:
-        _drawBoundingBoxAnnotation(canvas, annotation.points, paint, isSelected);
+        _drawBoundingBoxAnnotation(canvas, annotation.points, paint, showHandles);
         break;
       case AnnotationTool.polygon:
-        _drawPolygonAnnotation(canvas, annotation.points, paint);
+        _drawPolygonAnnotation(canvas, annotation.points, paint, showHandles);
         break;
       case AnnotationTool.keypoint:
-        _drawKeypointsAnnotation(canvas, annotation.points, paint);
+        _drawKeypointsAnnotation(canvas, annotation.points, paint, showHandles);
         break;
       case AnnotationTool.none:
         break;
@@ -747,10 +789,10 @@ class DrawingPainter extends CustomPainter {
         _drawBoundingBoxAnnotation(canvas, drawingState.points, paint, false);
         break;
       case AnnotationTool.polygon:
-        _drawPolygonAnnotation(canvas, drawingState.points, paint);
+        _drawPolygonAnnotation(canvas, drawingState.points, paint, false);
         break;
       case AnnotationTool.keypoint:
-        _drawKeypointsAnnotation(canvas, drawingState.points, paint);
+        _drawKeypointsAnnotation(canvas, drawingState.points, paint, false);
         break;
       case AnnotationTool.none:
         break;
@@ -780,7 +822,7 @@ class DrawingPainter extends CustomPainter {
     }
   }
 
-  void _drawPolygonAnnotation(Canvas canvas, List<Offset> points, Paint paint) {
+  void _drawPolygonAnnotation(Canvas canvas, List<Offset> points, Paint paint, bool showHandles) {
     if (points.length < 2) return;
 
     final path = Path();
@@ -792,23 +834,43 @@ class DrawingPainter extends CustomPainter {
 
     canvas.drawPath(path, paint);
 
-    // Draw points
+    // Draw points with larger handles if in edit mode
     final pointPaint = Paint()
       ..color = paint.color
       ..style = PaintingStyle.fill;
 
+    final pointSize = showHandles ? 6.0 : 4.0;
     for (final point in points) {
-      canvas.drawCircle(point, 4.0, pointPaint);
+      canvas.drawCircle(point, pointSize, pointPaint);
+
+      // Draw edit handles (outer ring) if in edit mode
+      if (showHandles) {
+        final handlePaint = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0;
+        canvas.drawCircle(point, pointSize + 2.0, handlePaint);
+      }
     }
   }
 
-  void _drawKeypointsAnnotation(Canvas canvas, List<Offset> points, Paint paint) {
+  void _drawKeypointsAnnotation(Canvas canvas, List<Offset> points, Paint paint, bool showHandles) {
     final pointPaint = Paint()
       ..color = paint.color == Colors.blue ? Colors.red : paint.color
       ..style = PaintingStyle.fill;
 
+    final pointSize = showHandles ? 8.0 : 6.0;
     for (final point in points) {
-      canvas.drawCircle(point, 6.0, pointPaint);
+      canvas.drawCircle(point, pointSize, pointPaint);
+
+      // Draw edit handles (outer ring) if in edit mode
+      if (showHandles) {
+        final handlePaint = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0;
+        canvas.drawCircle(point, pointSize + 2.0, handlePaint);
+      }
     }
   }
 

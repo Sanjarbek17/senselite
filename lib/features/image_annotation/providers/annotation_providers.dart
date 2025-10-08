@@ -106,38 +106,52 @@ enum AnnotationTool {
   keypoint,
 }
 
+/// Canvas interaction modes
+enum CanvasMode {
+  drawing,
+  editing,
+}
+
 /// Represents a drawing state for annotations
 class DrawingState {
   final AnnotationTool tool;
   final List<Offset> points;
   final bool isDrawing;
+  final CanvasMode mode;
+  final String? editingAnnotationId;
 
   const DrawingState({
     this.tool = AnnotationTool.none,
     this.points = const [],
     this.isDrawing = false,
+    this.mode = CanvasMode.drawing,
+    this.editingAnnotationId,
   });
 
   DrawingState copyWith({
     AnnotationTool? tool,
     List<Offset>? points,
     bool? isDrawing,
+    CanvasMode? mode,
+    String? editingAnnotationId,
   }) {
     return DrawingState(
       tool: tool ?? this.tool,
       points: points ?? this.points,
       isDrawing: isDrawing ?? this.isDrawing,
+      mode: mode ?? this.mode,
+      editingAnnotationId: editingAnnotationId ?? this.editingAnnotationId,
     );
   }
 
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is DrawingState && other.tool == tool && _listEquals(other.points, points) && other.isDrawing == isDrawing;
+    return other is DrawingState && other.tool == tool && _listEquals(other.points, points) && other.isDrawing == isDrawing && other.mode == mode && other.editingAnnotationId == editingAnnotationId;
   }
 
   @override
-  int get hashCode => tool.hashCode ^ points.hashCode ^ isDrawing.hashCode;
+  int get hashCode => tool.hashCode ^ points.hashCode ^ isDrawing.hashCode ^ mode.hashCode ^ editingAnnotationId.hashCode;
 
   /// Helper method to compare lists
   bool _listEquals<T>(List<T>? a, List<T>? b) {
@@ -221,6 +235,25 @@ class DrawingStateNotifier extends StateNotifier<DrawingState> {
   /// Reset all drawing state
   void reset() {
     state = const DrawingState();
+  }
+
+  /// Switch to editing mode for a specific annotation
+  void startEditingAnnotation(String annotationId) {
+    state = state.copyWith(
+      mode: CanvasMode.editing,
+      editingAnnotationId: annotationId,
+      tool: AnnotationTool.none,
+      points: [],
+      isDrawing: false,
+    );
+  }
+
+  /// Exit editing mode and return to drawing mode
+  void exitEditingMode() {
+    state = state.copyWith(
+      mode: CanvasMode.drawing,
+      editingAnnotationId: null,
+    );
   }
 }
 
